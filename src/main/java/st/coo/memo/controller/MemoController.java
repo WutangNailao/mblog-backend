@@ -54,7 +54,7 @@ public class MemoController {
 
     @PostMapping("/{id}")
     @Operation(summary = "获取单条Memo详情", description = "获取单条Memo详情")
-    public ResponseDTO<MemoDto> get(@PathVariable("id") int id,@RequestParam(name = "count",defaultValue = "false") boolean count) {
+    public ResponseDTO<MemoDto> get(@PathVariable int id, @RequestParam(name = "count",defaultValue = "false") boolean count) {
         return ResponseDTO.success(memoService.get(id,count));
     }
 

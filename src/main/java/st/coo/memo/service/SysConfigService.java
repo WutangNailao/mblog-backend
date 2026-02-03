@@ -37,8 +37,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-import static st.coo.memo.entity.table.Tables.T_SYS_CONFIG;
-import static st.coo.memo.entity.table.Tables.T_USER;
+import static st.coo.memo.entity.table.TSysConfigTableDef.TSYS_CONFIG;
+import static st.coo.memo.entity.table.TUserTableDef.TUSER;
 
 @Slf4j
 @Component
@@ -64,8 +64,8 @@ public class SysConfigService {
         TSysConfig sysConfig = new TSysConfig();
         byte[] key = SecureUtil.generateKey(SymmetricAlgorithm.AES.getValue()).getEncoded();
         sysConfig.setValue(SaBase64Util.encodeBytesToString(key));
-        sysConfigMapper.updateByQuery(sysConfig,QueryWrapper.create().and(T_SYS_CONFIG.KEY.eq(SysConfigConstant.WEB_HOOK_TOKEN))
-                .and(T_SYS_CONFIG.VALUE.isNull().or(T_SYS_CONFIG.VALUE.eq(""))));
+        sysConfigMapper.updateByQuery(sysConfig,QueryWrapper.create().and(TSYS_CONFIG.KEY.eq(SysConfigConstant.WEB_HOOK_TOKEN))
+                .and(TSYS_CONFIG.VALUE.isNull().or(TSYS_CONFIG.VALUE.eq(""))));
     }
 
     public void save(SaveSysConfigRequest saveSysConfigRequest) {
@@ -77,7 +77,7 @@ public class SysConfigService {
 
         if (push2OfficialSquare.isPresent()){
 
-            TUser admin = userMapperExt.selectOneByQuery(QueryWrapper.create().and(T_USER.ROLE.eq("ADMIN")));
+            TUser admin = userMapperExt.selectOneByQuery(QueryWrapper.create().and(TUSER.ROLE.eq("ADMIN")));
             Optional<SysConfigDto> backendDomain = saveSysConfigRequest.getItems().stream()
                     .filter(r -> Objects.equals(r.getKey(), SysConfigConstant.DOMAIN) && Objects.equals("true", r.getValue())).findFirst();
             Optional<SysConfigDto> corsDomainList = saveSysConfigRequest.getItems().stream()
@@ -128,7 +128,7 @@ public class SysConfigService {
     }
 
     public List<SysConfigDto> getAll(List<String> keys) {
-        List<TSysConfig> list = sysConfigMapper.selectListByQuery(QueryWrapper.create().and(T_SYS_CONFIG.KEY.in(keys)));
+        List<TSysConfig> list = sysConfigMapper.selectListByQuery(QueryWrapper.create().and(TSYS_CONFIG.KEY.in(keys)));
         return list.stream().map(r -> {
             SysConfigDto dto = new SysConfigDto();
             BeanUtils.copyProperties(r, dto);

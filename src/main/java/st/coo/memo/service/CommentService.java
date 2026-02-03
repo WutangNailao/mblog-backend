@@ -30,8 +30,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static st.coo.memo.entity.table.Tables.T_COMMENT;
-import static st.coo.memo.entity.table.Tables.T_USER;
+import static st.coo.memo.entity.table.TCommentTableDef.TCOMMENT;
+import static st.coo.memo.entity.table.TUserTableDef.TUSER;
 
 @Slf4j
 @Component
@@ -84,7 +84,7 @@ public class CommentService {
             String username = matcher.group().trim();
             if (StringUtils.isNotEmpty(username)) {
                 username = username.substring(1);
-                TUser mentionedUser = userMapperExt.selectOneByQuery(QueryWrapper.create().and(T_USER.DISPLAY_NAME.eq(username)));
+                TUser mentionedUser = userMapperExt.selectOneByQuery(QueryWrapper.create().and(TUSER.DISPLAY_NAME.eq(username)));
                 if (mentionedUser != null) {
                     mentioned.add(new MentionedUser(mentionedUser.getId(), mentionedUser.getDisplayName()));
                 }
@@ -131,8 +131,8 @@ public class CommentService {
 
     public QueryCommentListResponse query(QueryCommentListRequest request) {
         Page<TComment> paginate = commentMapperExt.paginate(request.getPage(), request.getSize(), QueryWrapper.create()
-                .and(T_COMMENT.MEMO_ID.eq(request.getMemoId()))
-                .and(T_COMMENT.USER_ID.gt(0).or(T_COMMENT.USER_ID.lt(0).and(T_COMMENT.APPROVED.eq(1))).when(!StpUtil.hasRole("ADMIN")))
+                .and(TCOMMENT.MEMO_ID.eq(request.getMemoId()))
+                .and(TCOMMENT.USER_ID.gt(0).or(TCOMMENT.USER_ID.lt(0).and(TCOMMENT.APPROVED.eq(1))).when(!StpUtil.hasRole("ADMIN")))
                 .orderBy("created"));
         QueryCommentListResponse response = new QueryCommentListResponse();
         response.setList(paginate.getRecords().stream().map(r -> {
@@ -148,13 +148,13 @@ public class CommentService {
     public void singleApprove(int commentId) {
         TComment comment = new TComment();
         comment.setApproved(1);
-        commentMapperExt.updateByQuery(comment, true, QueryWrapper.create().and(T_COMMENT.ID.eq(commentId)).and(T_COMMENT.USER_ID.lt(0)));
+        commentMapperExt.updateByQuery(comment, true, QueryWrapper.create().and(TCOMMENT.ID.eq(commentId)).and(TCOMMENT.USER_ID.lt(0)));
     }
 
     public void memoApprove(int memoId) {
         TComment comment = new TComment();
         comment.setApproved(1);
-        commentMapperExt.updateByQuery(comment, true, QueryWrapper.create().and(T_COMMENT.MEMO_ID.eq(memoId)).and(T_COMMENT.USER_ID.lt(0)));
+        commentMapperExt.updateByQuery(comment, true, QueryWrapper.create().and(TCOMMENT.MEMO_ID.eq(memoId)).and(TCOMMENT.USER_ID.lt(0)));
     }
 
 

@@ -17,7 +17,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.Objects;
 
-import static st.coo.memo.entity.table.Tables.T_DEV_TOKEN;
+import static st.coo.memo.entity.table.TDevTokenTableDef.TDEV_TOKEN;
 
 @Configuration
 @Slf4j
@@ -29,8 +29,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
             if (StpUtil.isLogin() && Objects.equals(StpUtil.getLoginDevice(), LoginType.API.name())) {
 
                 long count = Db.selectCountByQuery("t_dev_token", QueryWrapper.create()
-                        .and(T_DEV_TOKEN.TOKEN.eq(StpUtil.getTokenValue()))
-                        .and(T_DEV_TOKEN.USER_ID.eq(StpUtil.getLoginIdAsInt()))
+                        .and(TDEV_TOKEN.TOKEN.eq(StpUtil.getTokenValue()))
+                        .and(TDEV_TOKEN.USER_ID.eq(StpUtil.getLoginIdAsInt()))
                 );
                 if (count == 0  ) {
                     ResponseDTO<Void> responseDTO = ResponseDTO.fail(ResponseCode.need_login.getCode(),"api token已失效");

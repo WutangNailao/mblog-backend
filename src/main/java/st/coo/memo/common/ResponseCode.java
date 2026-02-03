@@ -1,7 +1,9 @@
 package st.coo.memo.common;
 
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 
+@Getter
 @AllArgsConstructor
 public enum ResponseCode {
     success(0, ""),
@@ -12,22 +14,7 @@ public enum ResponseCode {
     system_exception(99,"system_exception")
     ;
 
-    private int code;
-    private String msg;
-
-    public int getCode() {
-        return code;
-    }
-
-    public void setCode(int code) {
-        this.code = code;
-    }
-
-    public String getMsg() {
-        return msg;
-    }
-
-    public void setMsg(String msg) {
-        this.msg = msg;
-    }
+    private final int code;
+    private final String msg;
+    
 }

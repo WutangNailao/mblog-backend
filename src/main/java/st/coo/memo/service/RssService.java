@@ -20,7 +20,7 @@ import st.coo.memo.mapper.UserMapperExt;
 
 import java.util.List;
 
-import static st.coo.memo.entity.table.Tables.T_USER;
+import static st.coo.memo.entity.table.TUserTableDef.TUSER;
 
 @Slf4j
 @Component
@@ -42,7 +42,7 @@ public class RssService {
         SyndFeed feed = new SyndFeedImpl();
         feed.setFeedType("rss_2.0");
 
-        TUser admin = userMapper.selectOneByQuery(QueryWrapper.create().and(T_USER.ROLE.eq("ADMIN")));
+        TUser admin = userMapper.selectOneByQuery(QueryWrapper.create().and(TUSER.ROLE.eq("ADMIN")));
         if (admin == null) {
             throw new BizException(ResponseCode.fail, "管理员不存在");
         }

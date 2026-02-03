@@ -40,7 +40,12 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static st.coo.memo.entity.table.Tables.*;
+import static st.coo.memo.entity.table.TCommentTableDef.TCOMMENT;
+import static st.coo.memo.entity.table.TMemoTableDef.TMEMO;
+import static st.coo.memo.entity.table.TResourceTableDef.TRESOURCE;
+import static st.coo.memo.entity.table.TTagTableDef.TTAG;
+import static st.coo.memo.entity.table.TUserMemoRelationTableDef.TUSER_MEMO_RELATION;
+import static st.coo.memo.entity.table.TUserTableDef.TUSER;
 
 @Slf4j
 @Component
@@ -103,9 +108,9 @@ public class MemoService {
                 tagMapper.decrementTagCount(StpUtil.getLoginIdAsInt(), tag);
             }
         }
-        resourceMapper.deleteByQuery(QueryWrapper.create().and(T_RESOURCE.MEMO_ID.eq(id)));
+        resourceMapper.deleteByQuery(QueryWrapper.create().and(TRESOURCE.MEMO_ID.eq(id)));
         memoMapper.deleteById(id);
-        commentMapperExt.deleteByQuery(QueryWrapper.create().and(T_COMMENT.MEMO_ID.eq(id)));
+        commentMapperExt.deleteByQuery(QueryWrapper.create().and(TCOMMENT.MEMO_ID.eq(id)));
 
         TUser user = userMapper.selectOneById(StpUtil.getLoginIdAsInt());
 
@@ -172,8 +177,8 @@ public class MemoService {
         tMemo.setUpdated(new Timestamp(System.currentTimeMillis()));
         tMemo.setSource(saveMemoRequest.getSource());
         List<TTag> existsTagList = tags.size() == 0 ? Lists.newArrayList() : tagMapper.selectListByQuery(QueryWrapper.create().
-                and(T_TAG.NAME.in(tags)).
-                and(T_TAG.USER_ID.eq(StpUtil.getLoginIdAsInt())));
+                and(TTAG.NAME.in(tags)).
+                and(TTAG.USER_ID.eq(StpUtil.getLoginIdAsInt())));
 
         if (!CollectionUtils.isEmpty(existsTagList)) {
             tags.removeAll(existsTagList.stream().map(TTag::getName).toList());
@@ -196,7 +201,7 @@ public class MemoService {
                     TResource resource = new TResource();
                     resource.setMemoId(tMemo.getId());
                     Assert.isTrue(resourceMapper.updateByQuery(resource, QueryWrapper.create()
-                            .and(T_RESOURCE.MEMO_ID.eq(0)).and(T_RESOURCE.PUBLIC_ID.eq(publicId))) == 1, "更新resource异常");
+                            .and(TRESOURCE.MEMO_ID.eq(0)).and(TRESOURCE.PUBLIC_ID.eq(publicId))) == 1, "更新resource异常");
                 }
             }
             return true;
@@ -232,7 +237,7 @@ public class MemoService {
 
             String backendUrl = sysConfigService.getString(SysConfigConstant.DOMAIN);
 
-            List<TResource> list = resourceMapper.selectListByQuery(QueryWrapper.create().and(T_RESOURCE.MEMO_ID.eq(memo.getId())));
+            List<TResource> list = resourceMapper.selectListByQuery(QueryWrapper.create().and(TRESOURCE.MEMO_ID.eq(memo.getId())));
             Gson gson = new Gson();
             String corsDomainList = sysConfigService.getString(SysConfigConstant.CORS_DOMAIN_LIST);
 
@@ -281,7 +286,7 @@ public class MemoService {
             TUser user = userMapper.selectOneById(memo.getUserId());
             String backendUrl = sysConfigService.getString(SysConfigConstant.DOMAIN);
 
-            List<TResource> list = resourceMapper.selectListByQuery(QueryWrapper.create().and(T_RESOURCE.MEMO_ID.eq(memo.getId())));
+            List<TResource> list = resourceMapper.selectListByQuery(QueryWrapper.create().and(TRESOURCE.MEMO_ID.eq(memo.getId())));
             List<String> resources = list.stream().map(ele -> "%s/api/resource/%s".formatted(backendUrl, ele.getPublicId())).toList();
             Gson gson = new Gson();
 
@@ -332,8 +337,8 @@ public class MemoService {
         }
         if (!CollectionUtils.isEmpty(tags)) {
             existsTagList = tagMapper.selectListByQuery(QueryWrapper.create().
-                    and(T_TAG.NAME.in(tags)).
-                    and(T_TAG.USER_ID.eq(StpUtil.getLoginIdAsInt())));
+                    and(TTAG.NAME.in(tags)).
+                    and(TTAG.USER_ID.eq(StpUtil.getLoginIdAsInt())));
             tags.removeAll(existsTagList.stream().map(TTag::getName).toList());
         } else {
             existsTagList = Lists.newArrayList();
@@ -362,7 +367,7 @@ public class MemoService {
                     TResource resource = new TResource();
                     resource.setMemoId(tMemo.getId());
                     Assert.isTrue(resourceMapper.updateByQuery(resource, QueryWrapper.create()
-                            .and(T_RESOURCE.MEMO_ID.eq(0)).and(T_RESOURCE.PUBLIC_ID.eq(publicId))) == 1, "更新resource异常");
+                            .and(TRESOURCE.MEMO_ID.eq(0)).and(TRESOURCE.PUBLIC_ID.eq(publicId))) == 1, "更新resource异常");
                 }
             }
 
@@ -410,9 +415,9 @@ public class MemoService {
             for (MemoDto memo : list) {
                 memo.setUnApprovedCommentCount(commentMapperExt.selectCountByQuery(
                         QueryWrapper.create()
-                                .and(T_COMMENT.MEMO_ID.eq(memo.getId()))
-                                .and(T_COMMENT.USER_ID.lt(0)
-                                        .and(T_COMMENT.APPROVED.eq(0)))));
+                                .and(TCOMMENT.MEMO_ID.eq(memo.getId()))
+                                .and(TCOMMENT.USER_ID.lt(0)
+                                        .and(TCOMMENT.APPROVED.eq(0)))));
             }
         }
         ListMemoResponse response = new ListMemoResponse();
@@ -423,7 +428,7 @@ public class MemoService {
         if (isLogin && listMemoRequest.isCommented() && listMemoRequest.isMentioned()) {
             TUser tUser = new TUser();
             tUser.setLastClickedMentioned(Timestamp.valueOf(LocalDateTime.now()));
-            userMapper.updateByQuery(tUser, true, QueryWrapper.create().and(T_USER.ID.eq(StpUtil.getLoginIdAsInt())));
+            userMapper.updateByQuery(tUser, true, QueryWrapper.create().and(TUSER.ID.eq(StpUtil.getLoginIdAsInt())));
         }
         return response;
     }
@@ -431,12 +436,12 @@ public class MemoService {
 
     public MemoDto get(int id, boolean count) {
         boolean isLogin = StpUtil.isLogin();
-        QueryWrapper queryWrapper = QueryWrapper.create().and(T_MEMO.ID.eq(id));
+        QueryWrapper queryWrapper = QueryWrapper.create().and(TMEMO.ID.eq(id));
         if (isLogin) {
-            queryWrapper.and(T_MEMO.VISIBILITY.in(Lists.newArrayList(Visibility.PUBLIC.name(), Visibility.PROTECT.name()))
-                    .or(T_MEMO.USER_ID.eq(StpUtil.getLoginIdAsInt()).and(T_MEMO.VISIBILITY.eq(Visibility.PRIVATE.name()))));
+            queryWrapper.and(TMEMO.VISIBILITY.in(Lists.newArrayList(Visibility.PUBLIC.name(), Visibility.PROTECT.name()))
+                    .or(TMEMO.USER_ID.eq(StpUtil.getLoginIdAsInt()).and(TMEMO.VISIBILITY.eq(Visibility.PRIVATE.name()))));
         } else {
-            queryWrapper.and(T_MEMO.VISIBILITY.in(Lists.newArrayList(Visibility.PUBLIC.name())));
+            queryWrapper.and(TMEMO.VISIBILITY.in(Lists.newArrayList(Visibility.PUBLIC.name())));
         }
         TMemo tMemo = memoMapper.selectOneByQuery(queryWrapper);
         if (tMemo != null && count) {
@@ -457,9 +462,9 @@ public class MemoService {
         tMemo.setAuthorRole(user.getRole());
         tMemo.setEmail(user.getEmail());
         tMemo.setBio(user.getBio());
-        tMemo.setUnApprovedCommentCount(commentMapperExt.selectCountByQuery(QueryWrapper.create().and(T_COMMENT.MEMO_ID.eq(memo.getId())).and(T_COMMENT.USER_ID.lt(0).and(T_COMMENT.APPROVED.eq(0)))));
+        tMemo.setUnApprovedCommentCount(commentMapperExt.selectCountByQuery(QueryWrapper.create().and(TCOMMENT.MEMO_ID.eq(memo.getId())).and(TCOMMENT.USER_ID.lt(0).and(TCOMMENT.APPROVED.eq(0)))));
         String domain = sysConfigService.getString(SysConfigConstant.DOMAIN);
-        List<TResource> resources = resourceMapper.selectListByQuery(QueryWrapper.create().and(T_RESOURCE.MEMO_ID.eq(memo.getId())));
+        List<TResource> resources = resourceMapper.selectListByQuery(QueryWrapper.create().and(TRESOURCE.MEMO_ID.eq(memo.getId())));
         tMemo.setResources(resources.stream().map(r -> convertToResourceDto(domain, r)).toList());
         return tMemo;
     }
@@ -500,13 +505,13 @@ public class MemoService {
         if (StpUtil.isLogin()) {
             userId = StpUtil.getLoginIdAsInt();
         } else {
-            TUser admin = userMapper.selectOneByQuery(QueryWrapper.create().and(T_USER.ROLE.eq("ADMIN")));
+            TUser admin = userMapper.selectOneByQuery(QueryWrapper.create().and(TUSER.ROLE.eq("ADMIN")));
             userId = admin.getId();
         }
         TUser user = userMapper.selectOneById(userId);
-        long totalMemos = memoMapper.selectCountByQuery(QueryWrapper.create().and(T_MEMO.USER_ID.eq(userId)));
+        long totalMemos = memoMapper.selectCountByQuery(QueryWrapper.create().and(TMEMO.USER_ID.eq(userId)));
         long totalDays = Duration.between(user.getCreated().toLocalDateTime(), LocalDateTime.now()).toDays();
-        long totalTags = tagMapper.selectCountByQuery(QueryWrapper.create().and(T_TAG.USER_ID.eq(userId)));
+        long totalTags = tagMapper.selectCountByQuery(QueryWrapper.create().and(TTAG.USER_ID.eq(userId)));
 
         statisticsResponse.setTotalMemos(totalMemos);
         statisticsResponse.setTotalTags(totalTags);
@@ -540,9 +545,9 @@ public class MemoService {
         }
 
         QueryWrapper queryWrapper = QueryWrapper.create()
-                .and(T_USER_MEMO_RELATION.MEMO_ID.eq(request.getMemoId()))
-                .and(T_USER_MEMO_RELATION.USER_ID.eq(StpUtil.getLoginIdAsInt()))
-                .and(T_USER_MEMO_RELATION.FAV_TYPE.eq(request.getType()));
+                .and(TUSER_MEMO_RELATION.MEMO_ID.eq(request.getMemoId()))
+                .and(TUSER_MEMO_RELATION.USER_ID.eq(StpUtil.getLoginIdAsInt()))
+                .and(TUSER_MEMO_RELATION.FAV_TYPE.eq(request.getType()));
 
         if (Objects.equals(request.getOperateType(), "ADD")) {
             TUserMemoRelation relation = new TUserMemoRelation();

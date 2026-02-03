@@ -24,13 +24,13 @@ public class ResourceController {
     @PostMapping("/upload")
     @SaCheckLogin
     @Operation(summary = "上传资源", description = "上传资源")
-    public ResponseDTO<List<UploadResourceResponse>> upload(@RequestParam("files") MultipartFile files[]) {
+    public ResponseDTO<List<UploadResourceResponse>> upload(@RequestParam("files") MultipartFile[] files) {
         return ResponseDTO.success(resourceService.upload(files));
     }
 
     @GetMapping("/{publicId}")
     @Operation(summary = "访问资源", description = "访问资源")
-    public void get(@PathVariable("publicId") String publicId, HttpServletResponse httpServletResponse){
+    public void get(@PathVariable String publicId, HttpServletResponse httpServletResponse){
         resourceService.get(publicId,httpServletResponse);
     }
 }

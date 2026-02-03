@@ -3,7 +3,6 @@ package st.coo.memo.dto.memo;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
-import java.util.Date;
 import java.util.List;
 
 @Data

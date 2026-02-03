@@ -28,7 +28,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static st.coo.memo.entity.table.Tables.*;
+import static st.coo.memo.entity.table.TCommentTableDef.TCOMMENT;
+import static st.coo.memo.entity.table.TMemoTableDef.TMEMO;
+import static st.coo.memo.entity.table.TUserMemoRelationTableDef.TUSER_MEMO_RELATION;
+import static st.coo.memo.entity.table.TUserTableDef.TUSER;
 
 
 @Slf4j
@@ -101,7 +104,7 @@ public class UserService {
         if (StpUtil.isLogin()) {
             user = userMapper.selectOneById(StpUtil.getLoginIdAsInt());
         } else {
-            user = userMapper.selectOneByQuery(QueryWrapper.create().and(T_USER.ROLE.eq("ADMIN")));
+            user = userMapper.selectOneByQuery(QueryWrapper.create().and(TUSER.ROLE.eq("ADMIN")));
         }
         UserDto userDto = new UserDto();
         if (user == null) {
@@ -123,7 +126,7 @@ public class UserService {
 
     public LoginResponse login(LoginRequest loginRequest) {
         TUser user = userMapper.selectOneByQuery(QueryWrapper.create()
-                .and(T_USER.USERNAME.eq(loginRequest.getUsername()))
+                .and(TUSER.USERNAME.eq(loginRequest.getUsername()))
         );
 
         if (user == null) {
@@ -156,17 +159,17 @@ public class UserService {
 
     public MemoStatisticsDto statistics() {
         int userId = StpUtil.getLoginIdAsInt();
-        long total = memoMapperExt.selectCountByQuery(QueryWrapper.create().and(T_MEMO.USER_ID.eq(userId)));
-        long liked = userMemoRelationMapperExt.selectCountByQuery(QueryWrapper.create().and(T_USER_MEMO_RELATION.USER_ID.eq(userId))
-                .and(T_USER_MEMO_RELATION.FAV_TYPE.eq("LIKE")));
+        long total = memoMapperExt.selectCountByQuery(QueryWrapper.create().and(TMEMO.USER_ID.eq(userId)));
+        long liked = userMemoRelationMapperExt.selectCountByQuery(QueryWrapper.create().and(TUSER_MEMO_RELATION.USER_ID.eq(userId))
+                .and(TUSER_MEMO_RELATION.FAV_TYPE.eq("LIKE")));
         long mentioned = commentMapperExt.countMemoByMentioned(userId,dbType);
         long commented = commentMapperExt.countMemoByUser(userId);
 
         TUser user = userMapper.selectOneById(StpUtil.getLoginIdAsInt());
         Timestamp lastClicked = user.getLastClickedMentioned() == null ? Timestamp.valueOf(LocalDateTime.now().minusYears(100)) : user.getLastClickedMentioned();
         long unreadMentioned=  commentMapperExt.selectCountByQuery(QueryWrapper.create()
-                .and(T_COMMENT.MENTIONED_USER_ID.like("#"+user.getId()+","))
-                .and(T_COMMENT.CREATED.ge(lastClicked)));
+                .and(TCOMMENT.MENTIONED_USER_ID.like("#"+user.getId()+","))
+                .and(TCOMMENT.CREATED.ge(lastClicked)));
 
         return new MemoStatisticsDto(total, liked, mentioned, commented,unreadMentioned);
     }

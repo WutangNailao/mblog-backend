@@ -42,7 +42,7 @@ public class UserController {
     @PostMapping("/{id}")
     @SaCheckLogin
     @Operation(summary = "获取用户详情", description = "获取用户详情")
-    public ResponseDTO<UserDto> get(@PathVariable("id") int id) {
+    public ResponseDTO<UserDto> get(@PathVariable int id) {
         return ResponseDTO.success(userService.get(id));
     }
 
