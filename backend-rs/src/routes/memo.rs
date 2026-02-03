@@ -8,7 +8,6 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{AuthUser, OptionalAuthUser};
-use crate::config::AppConfig;
 use crate::entity::{comment, memo, resource, tag, user, user_memo_relation};
 use crate::error::AppError;
 use crate::response::ResponseDto;
@@ -19,9 +18,9 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         .service(web::resource("/update").route(web::post().to(update)))
         .service(web::resource("/remove").route(web::post().to(remove)))
         .service(web::resource("/setPriority").route(web::post().to(set_priority)))
-    .service(web::resource("/list").route(web::post().to(list)))
-    .service(web::resource("/{id:\\d+}").route(web::post().to(get)))
-    .service(web::resource("/statistics").route(web::post().to(statistics)))
+        .service(web::resource("/list").route(web::post().to(list)))
+        .service(web::resource("/{id:\\d+}").route(web::post().to(get)))
+        .service(web::resource("/statistics").route(web::post().to(statistics)))
         .service(web::resource("/relation").route(web::post().to(relation)));
 }
 
@@ -138,10 +137,15 @@ async fn save(
     check_content_and_resource(&content, &public_ids)?;
 
     let tags = parse_tags(&content);
+    let visibility = payload
+        .visibility
+        .clone()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| Some("PUBLIC".to_string()));
     let memo_model = memo::ActiveModel {
         user_id: Set(auth.user_id),
         tags: Set(Some(format_tags(&tags))),
-        visibility: Set(payload.visibility.clone()),
+        visibility: Set(visibility),
         enable_comment: Set(Some(if payload.enable_comment.unwrap_or(false) { 1 } else { 0 })),
         content: Set(Some(replace_first_line(&content, &tags).trim().to_string())),
         created: Set(Some(Utc::now())),
@@ -176,7 +180,6 @@ async fn save(
         .map_err(map_tx_error)?;
 
     let memo_id = result.id;
-    push_official_square_async(db.get_ref().clone(), memo_id, "SAVE");
     notify_webhook_async(db.get_ref().clone(), memo_id);
 
     Ok(HttpResponse::Ok().json(ResponseDto::success(Some(memo_id))))
@@ -201,13 +204,23 @@ async fn update(
     let tags = parse_tags(&content);
     let old_tags = split_tags(exist.tags.clone());
 
+    let visibility = payload
+        .visibility
+        .clone()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| exist.visibility.clone());
+    let enable_comment = payload
+        .enable_comment
+        .map(|v| if v { 1 } else { 0 })
+        .or(exist.enable_comment);
+
     let memo_model = memo::ActiveModel {
         id: Set(id),
         tags: Set(Some(format_tags(&tags))),
         content: Set(Some(replace_first_line(&content, &tags).trim().to_string())),
-        enable_comment: Set(Some(if payload.enable_comment.unwrap_or(false) { 1 } else { 0 })),
+        enable_comment: Set(enable_comment),
         updated: Set(Some(Utc::now())),
-        visibility: Set(payload.visibility.clone().or(exist.visibility.clone())),
+        visibility: Set(visibility),
         created: Set(exist.created),
         source: Set(payload.source.clone().or(exist.source.clone())),
         ..Default::default()
@@ -233,8 +246,6 @@ async fn update(
     })
     .await
     .map_err(map_tx_error)?;
-
-    push_official_square_async(db.get_ref().clone(), id, "SAVE");
 
     Ok(HttpResponse::Ok().json(ResponseDto::<()>::success(None)))
 }
@@ -289,8 +300,6 @@ async fn remove(
     .await
     .map_err(map_tx_error)?;
 
-    push_official_square_async(db.get_ref().clone(), memo_id, "REMOVE");
-
     Ok(HttpResponse::Ok().json(ResponseDto::<()>::success(None)))
 }
 
@@ -344,17 +353,17 @@ async fn get(
     conditions.push("t.id = ?".to_string());
 
     if is_login {
-        let user_id = auth.0.as_ref().unwrap().user_id;
-        conditions.push(format!("(t.visibility in ('PUBLIC','PROTECT') or (t.visibility = 'PRIVATE' and t.user_id = {}))", user_id));
+        conditions.push("(t.visibility in ('PUBLIC','PROTECT') or (t.visibility = 'PRIVATE' and t.user_id = ?))".to_string());
     } else {
         conditions.push("t.visibility = 'PUBLIC'".to_string());
     }
 
-    let sql = format!(
-        "select t.* from t_memo t where {}",
-        conditions.join(" and ")
-    );
-    let memo_row = query_one(db.get_ref(), &sql, vec![memo_id.into()]).await?;
+    let sql = format!("select t.* from t_memo t where {}", conditions.join(" and "));
+    let mut values: Vec<sea_orm::Value> = vec![memo_id.into()];
+    if is_login {
+        values.push(auth.0.as_ref().unwrap().user_id.into());
+    }
+    let memo_row = query_one(db.get_ref(), &sql, values).await?;
     if memo_row.is_none() {
         return Ok(HttpResponse::Ok().json(ResponseDto::<MemoDto>::success(None)));
     }
@@ -371,7 +380,6 @@ async fn get(
 async fn list(
     db: web::Data<DatabaseConnection>,
     auth: OptionalAuthUser,
-    config: web::Data<AppConfig>,
     payload: web::Json<ListMemoRequest>,
 ) -> Result<HttpResponse, AppError> {
     let page = payload.page.unwrap_or(1).max(1);
@@ -380,19 +388,12 @@ async fn list(
 
     let is_login = auth.0.is_some();
     let current_user_id = auth.0.as_ref().map(|a| a.user_id);
-    let db_type = config.db_type.clone();
-
     let mut where_sql = vec!["t.status = 'NORMAL'".to_string()];
     let mut values = Vec::<sea_orm::Value>::new();
 
     if let Some(search) = payload.search.clone().filter(|s| !s.is_empty()) {
-        if db_type.trim() == "-sqlite" {
-            where_sql.push("t.content like ?".to_string());
-            values.push(format!("%{}%", search).into());
-        } else {
-            where_sql.push("t.content like ?".to_string());
-            values.push(format!("%{}%", search).into());
-        }
+        where_sql.push("t.content like ?".to_string());
+        values.push(format!("%{}%", search).into());
     }
 
     if let (Some(begin), Some(end)) = (payload.begin.clone(), payload.end.clone()) {
@@ -405,7 +406,8 @@ async fn list(
 
     if is_login {
         let uid = current_user_id.unwrap();
-        where_sql.push(format!("(t.visibility in ('PUBLIC','PROTECT') or (t.visibility = 'PRIVATE' and t.user_id = {}))", uid));
+        where_sql.push("(t.visibility in ('PUBLIC','PROTECT') or (t.visibility = 'PRIVATE' and t.user_id = ?))".to_string());
+        values.push(uid.into());
         if let Some(user_id) = payload.user_id {
             if user_id > 0 {
                 where_sql.push("t.user_id = ?".to_string());
@@ -419,11 +421,7 @@ async fn list(
         if payload.commented.unwrap_or(false) {
             where_sql.push("tc.memo_id = t.id".to_string());
             if payload.mentioned.unwrap_or(false) {
-                if db_type.trim() == "-sqlite" {
-                    where_sql.push("tc.mentioned_user_id like ?".to_string());
-                } else {
-                    where_sql.push("tc.mentioned_user_id like ?".to_string());
-                }
+                where_sql.push("tc.mentioned_user_id like ?".to_string());
                 values.push(format!("%#{},%", uid).into());
             } else {
                 where_sql.push("tc.user_id = ?".to_string());
@@ -440,17 +438,12 @@ async fn list(
         }
     }
 
-    if let Some(tag_value) = payload.tag.clone() {
-        if db_type.trim() == "-sqlite" {
-            where_sql.push("t.tags like ?".to_string());
-            values.push(format!("%{},%", tag_value).into());
-        } else {
-            where_sql.push("t.tags like ?".to_string());
-            values.push(format!("%{},%", tag_value).into());
-        }
+    if let Some(tag_value) = payload.tag.clone().filter(|v| !v.trim().is_empty()) {
+        where_sql.push("t.tags like ?".to_string());
+        values.push(format!("%{},%", tag_value).into());
     }
 
-    if let Some(visibility) = payload.visibility.clone() {
+    if let Some(visibility) = payload.visibility.clone().filter(|v| !v.trim().is_empty()) {
         where_sql.push("t.visibility = ?".to_string());
         values.push(visibility.into());
     }
@@ -475,7 +468,7 @@ async fn list(
     let list_sql = format!(
         "select x.*,u.display_name as authorName,u.role as authorRole,u.email,u.bio,r.external_link as url,r.public_id as publicId,r.suffix,r.file_type as fileType,r.storage_type as storageType,r.file_name as fileName{} \
         from (select t.id,t.created,t.updated,t.content,t.priority,t.visibility,t.tags,t.status,t.user_id as userId,t.view_count as viewCount,t.enable_comment as enableComment,t.like_count as likeCount,t.comment_count as commentCount,t.source as source \
-        from t_memo t{} where {} order by {} t.created desc limit {},{}) x \
+        from t_memo t{} where {} order by {} t.created desc limit ?,?) x \
         left join t_user u on u.id = x.userId \
         left join t_resource r on r.memo_id = x.id{} \
         order by {} x.created desc, r.created",
@@ -483,13 +476,13 @@ async fn list(
         join_clause,
         where_clause,
         order,
-        offset,
-        size,
         if is_login {format!(" left join t_user_memo_relation mr on mr.memo_id = x.id and mr.user_id = {} and mr.fav_type = 'LIKE'", current_user_id.unwrap())} else {"".to_string()},
         if !payload.liked.unwrap_or(false) && !payload.commented.unwrap_or(false) && !payload.mentioned.unwrap_or(false) {"x.priority desc,"} else {""},
     );
 
-    let rows = query_all(db.get_ref(), &list_sql, values.clone()).await?;
+    values.push(offset.into());
+    values.push(size.into());
+    let rows = query_all(db.get_ref(), &list_sql, values).await?;
     let mut items = build_memo_list_from_rows(db.get_ref(), rows, is_login).await?;
 
     if is_login && payload.commented.unwrap_or(false) && payload.mentioned.unwrap_or(false) {
@@ -508,7 +501,6 @@ async fn list(
 async fn statistics(
     db: web::Data<DatabaseConnection>,
     auth: OptionalAuthUser,
-    config: web::Data<AppConfig>,
     payload: web::Json<StatisticsRequest>,
 ) -> Result<HttpResponse, AppError> {
     let begin = payload.begin.clone().and_then(|b| parse_date(&b).ok());
@@ -516,6 +508,9 @@ async fn statistics(
 
     let begin = begin.unwrap_or_else(|| (Utc::now() - Duration::days(50)).naive_utc());
     let end = end.unwrap_or_else(|| (Utc::now() + Duration::days(1)).naive_utc());
+    if end < begin {
+        return Err(AppError::param_error("end before begin"));
+    }
 
     let user_id = if let Some(auth) = auth.0 {
         auth.user_id
@@ -556,12 +551,7 @@ async fn statistics(
     )
     .await?;
 
-    let db_type = config.db_type.clone();
-    let stats_sql = if db_type.trim() == "-sqlite" {
-        "select date(created/1000,'unixepoch') as day,count(1) as count from t_memo where user_id = ? and created between ? and ? group by date(created/1000,'unixepoch') order by date(created/1000,'unixepoch') desc"
-    } else {
-        "select date(created) as day,count(1) as count from t_memo where user_id = ? and created between ? and ? group by date(created) order by date(created) desc"
-    };
+    let stats_sql = "select date(created/1000,'unixepoch') as day,count(1) as count from t_memo where user_id = ? and created between ? and ? group by date(created/1000,'unixepoch') order by date(created/1000,'unixepoch') desc";
 
     let rows = query_all(
         db.get_ref(),
@@ -601,35 +591,70 @@ async fn relation(
     }
 
     if payload.operate_type == "ADD" {
-        let count = query_count(
-            db.get_ref(),
-            "select count(1) as cnt from t_user_memo_relation where memo_id = ? and user_id = ? and fav_type = ?",
-            vec![payload.memo_id.into(), auth.user_id.into(), payload.r#type.clone().into()],
-        )
-        .await?;
-        if count > 0 {
-            return Err(AppError::fail("数据已存在"));
-        }
-        exec_sql(db.get_ref(), "update t_memo set like_count = like_count + 1 where id = ?", vec![payload.memo_id.into()]).await?;
-        let relation = user_memo_relation::ActiveModel {
-            memo_id: Set(payload.memo_id),
-            user_id: Set(auth.user_id),
-            fav_type: Set(payload.r#type.clone()),
-            created: Set(Some(Utc::now())),
-            ..Default::default()
-        };
-        relation.insert(db.get_ref()).await.map_err(|_| AppError::system_exception())?;
+        db.transaction::<_, (), AppError>(|txn| {
+            let memo_id = payload.memo_id;
+            let user_id = auth.user_id;
+            let fav_type = payload.r#type.clone();
+            Box::pin(async move {
+                let count = query_count(
+                    txn,
+                    "select count(1) as cnt from t_user_memo_relation where memo_id = ? and user_id = ? and fav_type = ?",
+                    vec![memo_id.into(), user_id.into(), fav_type.clone().into()],
+                )
+                .await?;
+                if count > 0 {
+                    return Err(AppError::fail("数据已存在"));
+                }
+
+                let relation = user_memo_relation::ActiveModel {
+                    memo_id: Set(memo_id),
+                    user_id: Set(user_id),
+                    fav_type: Set(fav_type),
+                    created: Set(Some(Utc::now())),
+                    ..Default::default()
+                };
+                relation
+                    .insert(txn)
+                    .await
+                    .map_err(|_| AppError::system_exception())?;
+
+                exec_sql(
+                    txn,
+                    "update t_memo set like_count = like_count + 1 where id = ?",
+                    vec![memo_id.into()],
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await
+        .map_err(map_tx_error)?;
     } else if payload.operate_type == "REMOVE" {
-        let result = user_memo_relation::Entity::delete_many()
-            .filter(user_memo_relation::Column::MemoId.eq(payload.memo_id))
-            .filter(user_memo_relation::Column::UserId.eq(auth.user_id))
-            .filter(user_memo_relation::Column::FavType.eq(payload.r#type.clone()))
-            .exec(db.get_ref())
-            .await
-            .map_err(|_| AppError::system_exception())?;
-        if result.rows_affected > 0 {
-            exec_sql(db.get_ref(), "update t_memo set like_count = like_count - 1 where id = ? and like_count >= 1", vec![payload.memo_id.into()]).await?;
-        }
+        db.transaction::<_, (), AppError>(|txn| {
+            let memo_id = payload.memo_id;
+            let user_id = auth.user_id;
+            let fav_type = payload.r#type.clone();
+            Box::pin(async move {
+                let result = user_memo_relation::Entity::delete_many()
+                    .filter(user_memo_relation::Column::MemoId.eq(memo_id))
+                    .filter(user_memo_relation::Column::UserId.eq(user_id))
+                    .filter(user_memo_relation::Column::FavType.eq(fav_type))
+                    .exec(txn)
+                    .await
+                    .map_err(|_| AppError::system_exception())?;
+                if result.rows_affected > 0 {
+                    exec_sql(
+                        txn,
+                        "update t_memo set like_count = like_count - 1 where id = ? and like_count >= 1",
+                        vec![memo_id.into()],
+                    )
+                    .await?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .map_err(map_tx_error)?;
     }
 
     Ok(HttpResponse::Ok().json(ResponseDto::<()>::success(None)))
@@ -813,7 +838,7 @@ fn map_tx_error(err: TransactionError<AppError>) -> AppError {
     }
 }
 
-async fn query_one(db: &DatabaseConnection, sql: &str, values: Vec<sea_orm::Value>) -> Result<Option<sea_orm::QueryResult>, AppError> {
+async fn query_one<C: ConnectionTrait>(db: &C, sql: &str, values: Vec<sea_orm::Value>) -> Result<Option<sea_orm::QueryResult>, AppError> {
     let backend = db.get_database_backend();
     let stmt = Statement::from_sql_and_values(backend, sql, values);
     db.query_one(stmt)
@@ -821,7 +846,7 @@ async fn query_one(db: &DatabaseConnection, sql: &str, values: Vec<sea_orm::Valu
         .map_err(|_| AppError::system_exception())
 }
 
-async fn query_all(db: &DatabaseConnection, sql: &str, values: Vec<sea_orm::Value>) -> Result<Vec<sea_orm::QueryResult>, AppError> {
+async fn query_all<C: ConnectionTrait>(db: &C, sql: &str, values: Vec<sea_orm::Value>) -> Result<Vec<sea_orm::QueryResult>, AppError> {
     let backend = db.get_database_backend();
     let stmt = Statement::from_sql_and_values(backend, sql, values);
     db.query_all(stmt)
@@ -829,7 +854,7 @@ async fn query_all(db: &DatabaseConnection, sql: &str, values: Vec<sea_orm::Valu
         .map_err(|_| AppError::system_exception())
 }
 
-async fn query_count(db: &DatabaseConnection, sql: &str, values: Vec<sea_orm::Value>) -> Result<i64, AppError> {
+async fn query_count<C: ConnectionTrait>(db: &C, sql: &str, values: Vec<sea_orm::Value>) -> Result<i64, AppError> {
     let row = query_one(db, sql, values).await?;
     Ok(row
         .and_then(|r| r.try_get("", "cnt").ok())
@@ -1072,118 +1097,10 @@ fn to_millis(dt: DateTime<Utc>) -> i64 {
     dt.timestamp_millis()
 }
 
-fn push_official_square_async(db: DatabaseConnection, memo_id: i32, action: &str) {
-    let action = action.to_string();
-    actix_web::rt::spawn(async move {
-        let _ = push_official_square(&db, memo_id, &action).await;
-    });
-}
-
 fn notify_webhook_async(db: DatabaseConnection, memo_id: i32) {
     actix_web::rt::spawn(async move {
         let _ = notify_webhook(&db, memo_id).await;
     });
-}
-
-async fn push_official_square(
-    db: &DatabaseConnection,
-    memo_id: i32,
-    action: &str,
-) -> Result<(), AppError> {
-    let push = sys_config_store::get_boolean(db, "PUSH_OFFICIAL_SQUARE")
-        .await
-        .map_err(|_| AppError::system_exception())?;
-    if !push {
-        return Ok(());
-    }
-
-    let memo_item = memo::Entity::find_by_id(memo_id)
-        .one(db)
-        .await
-        .map_err(|_| AppError::system_exception())?
-        .ok_or_else(|| AppError::fail("memo不存在"))?;
-
-    if memo_item.visibility.as_deref() != Some("PUBLIC") {
-        return Ok(());
-    }
-
-    let token = sys_config_store::get_string(db, "WEB_HOOK_TOKEN")
-        .await
-        .map_err(|_| AppError::system_exception())?
-        .unwrap_or_default();
-
-    let backend_url = sys_config_store::get_string(db, "DOMAIN")
-        .await
-        .map_err(|_| AppError::system_exception())?
-        .unwrap_or_default();
-    let cors_domain = sys_config_store::get_string(db, "CORS_DOMAIN_LIST")
-        .await
-        .map_err(|_| AppError::system_exception())?
-        .unwrap_or_default();
-
-    let embed = std::env::var("MBLOG_EMBED").unwrap_or_default();
-
-    let user_model = user::Entity::find_by_id(memo_item.user_id)
-        .one(db)
-        .await
-        .map_err(|_| AppError::system_exception())?
-        .ok_or_else(|| AppError::fail("用户不存在"))?;
-
-    let resources = resource::Entity::find()
-        .filter(resource::Column::MemoId.eq(memo_id))
-        .all(db)
-        .await
-        .map_err(|_| AppError::system_exception())?;
-
-    let list = resources.into_iter().map(|r| convert_resource(&backend_url, r)).collect::<Vec<_>>();
-
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Payload {
-        content: Option<String>,
-        tags: Option<String>,
-        publish_time: i64,
-        author: Option<String>,
-        website: Option<String>,
-        memo_id: i32,
-        avatar_url: Option<String>,
-        user_id: i32,
-        resources: Vec<ResourceDto>,
-    }
-
-    let website = if !embed.is_empty() && !backend_url.is_empty() {
-        Some(backend_url.clone())
-    } else if embed.is_empty() && !cors_domain.is_empty() {
-        cors_domain.split(',').next().map(|s| s.to_string())
-    } else {
-        None
-    };
-
-    let payload = Payload {
-        content: memo_item.content.clone(),
-        tags: memo_item.tags.clone(),
-        publish_time: memo_item.created.map(to_millis).unwrap_or(0),
-        author: user_model.display_name.clone(),
-        website,
-        memo_id: memo_item.id,
-        avatar_url: user_model.avatar_url.clone(),
-        user_id: user_model.id,
-        resources: list,
-    };
-
-    let url = if action == "REMOVE" {
-        format!("{}/api/memo/remove", std::env::var("OFFICIAL_SQUARE_URL").unwrap_or_else(|_| "https://square.mblog.club".to_string()))
-    } else {
-        format!("{}/api/memo/push", std::env::var("OFFICIAL_SQUARE_URL").unwrap_or_else(|_| "https://square.mblog.club".to_string()))
-    };
-
-    let client = reqwest::Client::new();
-    let mut req = client.post(url).json(&payload);
-    if !token.is_empty() {
-        req = req.header("token", token);
-    }
-    let _ = req.send().await;
-    Ok(())
 }
 
 async fn notify_webhook(db: &DatabaseConnection, memo_id: i32) -> Result<(), AppError> {

@@ -102,8 +102,10 @@ async fn upload(
                     .map_err(|_| AppError::system_exception())?
                     .unwrap_or_default();
                 if qiniu_param.trim().is_empty() || qiniu_param.trim() == "{}" {
+                    let _ = fs::remove_file(&target_path);
                     return Err(AppError::fail("七牛云相关参数没有设置"));
                 }
+                let _ = fs::remove_file(&target_path);
                 return Err(AppError::fail("上传资源失败"));
             }
             "AWSS3" => {
@@ -111,7 +113,13 @@ async fn upload(
                     .await
                     .map_err(|_| AppError::system_exception())?
                     .unwrap_or_default();
-                let (url, suffix_cfg) = upload_awss3(&s3_param, &target_path, &public_id).await?;
+                let (url, suffix_cfg) = match upload_awss3(&s3_param, &target_path, &public_id).await {
+                    Ok(result) => result,
+                    Err(err) => {
+                        let _ = fs::remove_file(&target_path);
+                        return Err(err);
+                    }
+                };
                 (url, "AWSS3".to_string(), suffix_cfg)
             }
             _ => (format!("/api/resource/{}", public_id), "LOCAL".to_string(), suffix.clone()),
@@ -171,7 +179,8 @@ async fn get_resource(
         None => return Err(AppError::fail("resource不存在")),
     };
 
-    if resource_item.storage_type.as_deref() == Some("LOCAL") {
+    let storage_type = resource_item.storage_type.as_deref().unwrap_or("LOCAL");
+    if storage_type == "LOCAL" {
         let file_path = resource_item.internal_path.unwrap_or_default();
         let data = fs::read(&file_path).map_err(|_| AppError::fail("获取resource异常"))?;
         let file_type = resource_item.file_type;

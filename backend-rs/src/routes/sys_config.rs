@@ -1,13 +1,11 @@
 use actix_web::{web, HttpResponse};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rand::RngCore;
-use reqwest::Client;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::AuthUser;
-use crate::config::AppConfig;
-use crate::entity::{sys_config, user};
+use crate::entity::sys_config;
 use crate::error::AppError;
 use crate::response::ResponseDto;
 use crate::sys_config as sys_config_store;
@@ -38,44 +36,21 @@ pub async fn init_defaults(db: &DatabaseConnection) {
         let mut bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut bytes);
         let encoded = STANDARD.encode(bytes);
-        let active = sys_config::ActiveModel {
-            key: Set(WEB_HOOK_TOKEN.to_string()),
-            value: Set(Some(encoded)),
-            ..Default::default()
-        };
-        let _ = sys_config::Entity::update(active).exec(db).await;
+        let _ = upsert_config(db, WEB_HOOK_TOKEN, Some(encoded)).await;
     }
 }
 
 async fn save(
     db: web::Data<DatabaseConnection>,
     auth: AuthUser,
-    config: web::Data<AppConfig>,
     payload: web::Json<SaveSysConfigRequest>,
 ) -> Result<HttpResponse, AppError> {
     require_admin(&auth)?;
 
     let items = payload.items.clone().ok_or_else(|| AppError::param_error("items must not be null"))?;
 
-    let push2square = items.iter().any(|r| r.key == PUSH_OFFICIAL_SQUARE && r.value.as_deref() == Some("true"));
-    if push2square {
-        let token = sys_config_store::get_string(db.get_ref(), WEB_HOOK_TOKEN)
-            .await
-            .map_err(|_| AppError::system_exception())?
-            .unwrap_or_default();
-        push_official_square(db.get_ref(), &config, &items, &token).await?;
-    }
-
     for item in items {
-        let active = sys_config::ActiveModel {
-            key: Set(item.key),
-            value: Set(item.value),
-            ..Default::default()
-        };
-        sys_config::Entity::update(active)
-            .exec(db.get_ref())
-            .await
-            .map_err(|_| AppError::system_exception())?;
+        upsert_config(db.get_ref(), &item.key, item.value).await?;
     }
 
     Ok(HttpResponse::Ok().json(ResponseDto::<()>::success(None)))
@@ -133,61 +108,22 @@ fn to_dto(model: sys_config::Model) -> SysConfigDto {
     }
 }
 
-async fn push_official_square(
+async fn upsert_config(
     db: &DatabaseConnection,
-    config: &AppConfig,
-    items: &[SysConfigDto],
-    token: &str,
+    key: &str,
+    value: Option<String>,
 ) -> Result<(), AppError> {
-    let admin = user::Entity::find()
-        .filter(user::Column::Role.eq("ADMIN"))
-        .one(db)
-        .await
-        .map_err(|_| AppError::system_exception())?
-        .ok_or_else(|| AppError::fail("管理员不存在"))?;
-
-    let backend_domain = items.iter().find(|r| r.key == DOMAIN).and_then(|r| r.value.clone());
-    let cors_domain = items.iter().find(|r| r.key == CORS_DOMAIN_LIST).and_then(|r| r.value.clone());
-    let embed = std::env::var("MBLOG_EMBED").unwrap_or_default();
-
-    let mut website = None;
-    if !embed.is_empty() {
-        if let Some(domain) = backend_domain {
-            website = Some(domain);
-        }
-    } else if let Some(cors) = cors_domain {
-        if let Some(first) = cors.split(',').next() {
-            website = Some(first.to_string());
-        }
-    }
-
-    #[derive(Serialize)]
-    struct Payload {
-        token: String,
-        author: String,
-        #[serde(rename = "avatarUrl")]
-        avatar_url: Option<String>,
-        website: Option<String>,
-    }
-
-    let payload = Payload {
-        token: token.to_string(),
-        author: admin.display_name.unwrap_or(admin.username),
-        avatar_url: admin.avatar_url,
-        website,
+    let active = sys_config::ActiveModel {
+        key: Set(key.to_string()),
+        value: Set(value),
+        ..Default::default()
     };
 
-    let url = format!("{}/api/token", config.official_square_url());
-    let client = Client::new();
-    let resp = client
-        .post(url)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|_| AppError::fail("连接广场异常,请查看后台日志"))?;
-
-    if !resp.status().is_success() {
-        return Err(AppError::fail("连接广场异常,请查看后台日志"));
+    if sys_config::Entity::insert(active.clone()).exec(db).await.is_err() {
+        sys_config::Entity::update(active)
+            .exec(db)
+            .await
+            .map_err(|_| AppError::system_exception())?;
     }
     Ok(())
 }
@@ -212,7 +148,4 @@ const THUMBNAIL_SIZE: &str = "THUMBNAIL_SIZE";
 const ANONYMOUS_COMMENT: &str = "ANONYMOUS_COMMENT";
 const COMMENT_APPROVED: &str = "COMMENT_APPROVED";
 
-const PUSH_OFFICIAL_SQUARE: &str = "PUSH_OFFICIAL_SQUARE";
 const WEB_HOOK_TOKEN: &str = "WEB_HOOK_TOKEN";
-const DOMAIN: &str = "DOMAIN";
-const CORS_DOMAIN_LIST: &str = "CORS_DOMAIN_LIST";

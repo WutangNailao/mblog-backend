@@ -170,6 +170,8 @@ async fn update_user(
         ..Default::default()
     };
 
+    active.updated = Set(Some(Utc::now()));
+
     if let Some(v) = payload.display_name.clone() {
         active.display_name = Set(Some(v));
     }
@@ -338,11 +340,10 @@ async fn list_names(
 async fn statistics(
     db: web::Data<DatabaseConnection>,
     auth: AuthUser,
-    config: web::Data<AppConfig>,
 ) -> Result<HttpResponse, AppError> {
     let total = count_total_memos(db.get_ref(), auth.user_id).await?;
     let liked = count_liked(db.get_ref(), auth.user_id).await?;
-    let mentioned = count_mentioned(db.get_ref(), auth.user_id, &config.db_type).await?;
+    let mentioned = count_mentioned(db.get_ref(), auth.user_id).await?;
     let commented = count_commented(db.get_ref(), auth.user_id).await?;
     let unread_mentioned = count_unread_mentioned(db.get_ref(), auth.user_id).await?;
 
@@ -403,19 +404,10 @@ async fn count_commented(db: &DatabaseConnection, user_id: i32) -> Result<i64, A
     .await
 }
 
-async fn count_mentioned(db: &DatabaseConnection, user_id: i32, db_type: &str) -> Result<i64, AppError> {
+async fn count_mentioned(db: &DatabaseConnection, user_id: i32) -> Result<i64, AppError> {
     let pattern = format!("%#{},%", user_id);
-    let sql = if db_type.trim() == "-sqlite" {
-        "SELECT COUNT(1) as cnt FROM (SELECT DISTINCT memo_id FROM t_comment WHERE mentioned_user_id LIKE ?) x"
-    } else {
-        "SELECT COUNT(1) as cnt FROM (SELECT DISTINCT memo_id FROM t_comment WHERE mentioned_user_id LIKE ?) x"
-    };
-    count_by_sql(
-        db,
-        sql,
-        vec![sea_orm::Value::String(Some(Box::new(pattern)))],
-    )
-    .await
+    let sql = "SELECT COUNT(1) as cnt FROM (SELECT DISTINCT memo_id FROM t_comment WHERE mentioned_user_id LIKE ?) x";
+    count_by_sql(db, sql, vec![sea_orm::Value::String(Some(Box::new(pattern)))]).await
 }
 
 async fn count_unread_mentioned(db: &DatabaseConnection, user_id: i32) -> Result<i64, AppError> {

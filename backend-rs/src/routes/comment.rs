@@ -178,10 +178,24 @@ async fn remove(
         return Err(AppError::fail("只能删除自己发的memo的评论"));
     }
 
-    comment::Entity::delete_by_id(query.id)
-        .exec(db.get_ref())
-        .await
-        .map_err(|_| AppError::system_exception())?;
+    let memo_id = comment_model.memo_id;
+    db.transaction::<_, (), AppError>(|txn| {
+        Box::pin(async move {
+            comment::Entity::delete_by_id(query.id)
+                .exec(txn)
+                .await
+                .map_err(|_| AppError::system_exception())?;
+            exec_sql(
+                txn,
+                "update t_memo set comment_count = comment_count - 1 where id = ? and comment_count >= 1",
+                vec![memo_id.into()],
+            )
+            .await?;
+            Ok(())
+        })
+    })
+    .await
+    .map_err(map_tx_error)?;
 
     Ok(HttpResponse::Ok().json(ResponseDto::<()>::success(None)))
 }
@@ -243,8 +257,10 @@ struct ApproveQuery {
 
 async fn single_approve(
     db: web::Data<DatabaseConnection>,
+    auth: AuthUser,
     query: web::Query<ApproveQuery>,
 ) -> Result<HttpResponse, AppError> {
+    require_admin(&auth)?;
     exec_sql(
         db.get_ref(),
         "update t_comment set approved = 1 where id = ? and user_id < 0",
@@ -256,8 +272,10 @@ async fn single_approve(
 
 async fn memo_approve(
     db: web::Data<DatabaseConnection>,
+    auth: AuthUser,
     query: web::Query<ApproveQuery>,
 ) -> Result<HttpResponse, AppError> {
+    require_admin(&auth)?;
     exec_sql(
         db.get_ref(),
         "update t_comment set approved = 1 where memo_id = ? and user_id < 0",
@@ -348,6 +366,13 @@ fn map_tx_error(err: TransactionError<AppError>) -> AppError {
         TransactionError::Connection(_) => AppError::system_exception(),
         TransactionError::Transaction(app) => app,
     }
+}
+
+fn require_admin(auth: &AuthUser) -> Result<(), AppError> {
+    if auth.role.as_deref() != Some("ADMIN") {
+        return Err(AppError::need_login());
+    }
+    Ok(())
 }
 
 fn to_rfc3339(dt: chrono::NaiveDateTime) -> String {
