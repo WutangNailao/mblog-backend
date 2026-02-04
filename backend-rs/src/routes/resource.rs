@@ -51,8 +51,16 @@ async fn upload(
 
     let mut responses = Vec::new();
 
-    while let Some(item) = payload.next().await {
-        let mut field = item.map_err(|_| AppError::fail("上传文件异常"))?;
+    loop {
+        let item = payload.next().await;
+        let item = match item {
+            Some(item) => item,
+            None => break,
+        };
+        let mut field = match item {
+            Ok(field) => field,
+            Err(_) => return Err(AppError::fail("上传文件异常")),
+        };
         let filename = field
             .content_disposition()
             .get_filename()
@@ -84,8 +92,16 @@ async fn upload(
         let mut hasher = Md5::new();
         let mut size: u64 = 0;
 
-        while let Some(chunk) = field.next().await {
-            let data = chunk.map_err(|_| AppError::fail("上传文件异常"))?;
+        loop {
+            let chunk = field.next().await;
+            let chunk = match chunk {
+                Some(chunk) => chunk,
+                None => break,
+            };
+            let data = match chunk {
+                Ok(data) => data,
+                Err(_) => return Err(AppError::fail("上传文件异常")),
+            };
             size += data.len() as u64;
             hasher.update(&data);
             f.write_all(&data).map_err(|_| AppError::fail("上传文件异常"))?;

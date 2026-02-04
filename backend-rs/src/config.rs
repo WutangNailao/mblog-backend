@@ -7,8 +7,8 @@ pub struct AppConfig {
     pub database_url: Option<String>,
     pub jwt_secret: String,
     pub token_header: String,
+    #[allow(dead_code)]
     pub safe_domain: String,
-    pub official_square_url: String,
     pub upload_storage_path: String,
 }
 
@@ -31,8 +31,6 @@ impl AppConfig {
             .unwrap_or_else(|_| "token".to_string());
 
         let safe_domain = env::var("MBLOG_FRONT_DOMAIN").unwrap_or_default();
-        let official_square_url = env::var("OFFICIAL_SQUARE_URL")
-            .unwrap_or_else(|_| "https://square.mblog.club".to_string());
         let upload_storage_path = env::var("UPLOAD_STORAGE_PATH")
             .unwrap_or_else(|_| "/opt/mblog/upload".to_string());
 
@@ -43,7 +41,6 @@ impl AppConfig {
             jwt_secret,
             token_header,
             safe_domain,
-            official_square_url,
             upload_storage_path,
         }
     }
@@ -58,10 +55,6 @@ impl AppConfig {
             return path.to_string();
         }
         format!("sqlite://{}", path)
-    }
-
-    pub fn official_square_url(&self) -> String {
-        self.official_square_url.clone()
     }
 
     pub fn upload_storage_path(&self) -> String {

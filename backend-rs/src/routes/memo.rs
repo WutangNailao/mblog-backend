@@ -1000,7 +1000,8 @@ async fn build_memo_list_from_rows(
             source: row.try_get("", "source").ok(),
         });
 
-        if let Ok(public_id) = row.try_get::<String>("", "publicId") {
+        let public_id = row.try_get::<String>("", "publicId").ok();
+        if let Some(public_id) = public_id {
             if !public_id.is_empty() {
                 let resource_dto = ResourceDto {
                     public_id,

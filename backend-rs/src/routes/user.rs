@@ -148,8 +148,7 @@ async fn register_user(
         ..Default::default()
     };
 
-    let result = user_model.insert(db.get_ref()).await;
-    if let Err(err) = result {
+    if let Err(err) = user_model.insert(db.get_ref()).await {
         let msg = err.to_string();
         if msg.contains("Duplicate") || msg.contains("UNIQUE") {
             return Err(AppError::fail("用户名或昵称已存在"));

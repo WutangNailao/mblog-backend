@@ -21,6 +21,7 @@ pub async fn get_boolean(db: &DatabaseConnection, key: &str) -> Result<bool, sea
     Ok(value.unwrap_or_default().to_lowercase() == "true")
 }
 
+#[allow(dead_code)]
 pub async fn get_cors_domain_list(db: &DatabaseConnection) -> Result<Option<String>, sea_orm::DbErr> {
     let config = sys_config::Entity::find()
         .filter(sys_config::Column::Key.eq("CORS_DOMAIN_LIST"))
