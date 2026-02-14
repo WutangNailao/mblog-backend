@@ -1,6 +1,5 @@
 use actix_multipart::Multipart;
 use actix_web::{web, HttpResponse};
-use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::ObjectCannedAcl;
@@ -252,7 +251,6 @@ async fn upload_awss3(param: &str, file_path: &Path, public_id: &str) -> Result<
         format!("{}/{}", prefix, public_id)
     };
 
-    let region_provider = RegionProviderChain::first_try(Region::new(region.clone()));
     let creds = aws_sdk_s3::config::Credentials::new(
         access_key,
         secret_key,
@@ -260,14 +258,12 @@ async fn upload_awss3(param: &str, file_path: &Path, public_id: &str) -> Result<
         None,
         "static",
     );
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(region_provider)
+    let s3_config = aws_sdk_s3::config::Builder::new()
+        .region(Region::new(region.clone()))
         .credentials_provider(creds)
-        .load()
-        .await;
-
-    let client = S3Client::new(&config);
-    let data = tokio::fs::read(file_path)
+        .build();
+    let client = S3Client::from_conf(s3_config);
+    let body = ByteStream::from_path(file_path)
         .await
         .map_err(|_| AppError::fail("上传资源失败"))?;
 
@@ -276,7 +272,7 @@ async fn upload_awss3(param: &str, file_path: &Path, public_id: &str) -> Result<
         .bucket(&bucket)
         .key(&key)
         .acl(ObjectCannedAcl::PublicRead)
-        .body(ByteStream::from(data))
+        .body(body)
         .send()
         .await
         .map_err(|_| AppError::fail("上传资源失败"))?;

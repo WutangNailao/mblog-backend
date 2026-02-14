@@ -1,6 +1,5 @@
 use actix_web::{web, HttpResponse};
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
-use regex::Regex;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
     Statement, TransactionError, TransactionTrait,
@@ -289,28 +288,30 @@ async fn parse_mentions(
     db: &DatabaseConnection,
     content: &str,
 ) -> Result<(Option<String>, Option<String>), AppError> {
-    let regex = Regex::new(r"(@.*?)\\s+").map_err(|_| AppError::system_exception())?;
     let mut names = Vec::new();
     let mut ids = Vec::new();
 
-    for cap in regex.captures_iter(content) {
-        if let Some(m) = cap.get(1) {
-            let mut username = m.as_str().trim().to_string();
-            if username.starts_with('@') {
-                username.remove(0);
-            }
-            if username.is_empty() {
-                continue;
-            }
-            let user_model = user::Entity::find()
-                .filter(user::Column::DisplayName.eq(username.clone()))
-                .one(db)
-                .await
-                .map_err(|_| AppError::system_exception())?;
-            if let Some(u) = user_model {
-                names.push(u.display_name.unwrap_or(u.username));
-                ids.push(u.id.to_string());
-            }
+    for token in content.split_whitespace() {
+        let Some(mut username) = token.strip_prefix('@').map(str::to_string) else {
+            continue;
+        };
+        if username.is_empty() {
+            continue;
+        }
+        while username.ends_with([',', '.', '!', '?', ';', ':']) {
+            username.pop();
+        }
+        if username.is_empty() {
+            continue;
+        }
+        let user_model = user::Entity::find()
+            .filter(user::Column::DisplayName.eq(username.clone()))
+            .one(db)
+            .await
+            .map_err(|_| AppError::system_exception())?;
+        if let Some(u) = user_model {
+            names.push(u.display_name.unwrap_or(u.username));
+            ids.push(u.id.to_string());
         }
     }
 
